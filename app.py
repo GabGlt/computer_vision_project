@@ -11,12 +11,12 @@ st.set_page_config(
 )
 
 @st.cache(allow_output_mutation=True)
-def load_model(path="svm_final.pkl"):
+def load_model(path="best_svm.pkl"):
     with open(path, "rb") as f:
         return pickle.load(f)
 
 try:
-    bundle = load_model("svm_final.pkl")
+    bundle = load_model("best_svm.pkl")
 except Exception as e:
     st.error(f"Failed to load model: {e}")
     st.stop()
