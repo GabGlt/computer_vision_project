@@ -1,6 +1,7 @@
 import streamlit as st
 import numpy as np
 import pickle
+import os
 import cv2
 from skimage.feature import graycomatrix, graycoprops
 
@@ -10,112 +11,86 @@ st.set_page_config(
     layout="wide"
 )
 
+IMG_SIZE = 256 
+
 @st.cache(allow_output_mutation=True)
-def load_model(path="best_svm.pkl"):
+def load_model(path="best_svm_final.pkl"):
     with open(path, "rb") as f:
         return pickle.load(f)
 
 try:
-    bundle = load_model("best_svm.pkl")
+    bundle = load_model("best_svm_final.pkl")
 except Exception as e:
     st.error(f"Failed to load model: {e}")
     st.stop()
 
-svm = bundle["model"]
-scaler = bundle.get("scaler", None)
-pca = bundle.get("pca", None)
-class_names = bundle.get("class_names", svm.classes_)
+svm         = bundle["model"]
+scaler      = bundle.get("scaler", None)
+pca         = bundle.get("pca", None)
+class_names = bundle["class_names"]
 
 def color_histogram(image):
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-    hist_hue = cv2.calcHist([image], [0], None, [180], [0, 180])
-    hist_saturation = cv2.calcHist([image], [1], None, [256], [0, 256])
-    hist_value = cv2.calcHist([image], [2], None, [256], [0, 256])
+    h = cv2.calcHist([hsv],[0],None,[180],[0,180])
+    s = cv2.calcHist([hsv],[1],None,[256],[0,256])
+    v = cv2.calcHist([hsv],[2],None,[256],[0,256])
 
-    cv2.normalize(hist_hue, hist_hue)
-    cv2.normalize(hist_saturation, hist_saturation)
-    cv2.normalize(hist_value, hist_value)
+    cv2.normalize(h, h)
+    cv2.normalize(s, s)
+    cv2.normalize(v, v)
 
-    color_feature_vector = np.concatenate([
-        hist_hue.flatten(),
-        hist_saturation.flatten(),
-        hist_value.flatten()
-    ]).astype(np.float32)
+    return np.concatenate([h.flatten(), s.flatten(), v.flatten()]).astype(np.float32)
 
-    return color_feature_vector
+def ccm_feature(image, levels=16):
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    feats = []
 
-def ccm_feature(image, distances=[1], angles=[0, np.pi/4, np.pi/2, 3*np.pi/4], levels=16):
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    H_channel, S_channel, V_channel = cv2.split(image)
-
-    channels = {'H': H_channel, 'S': S_channel, 'V': V_channel}
-    all_features = []
-
-    for _, img_channel in channels.items():
-        max_val = np.max(img_channel)
+    for channel in cv2.split(hsv):
+        max_val = channel.max()
         if max_val > 0:
-            quantized_img = (img_channel * (levels - 1) / max_val).astype(np.uint8)
+            q = (channel * (levels-1) / max_val).astype(np.uint8)
         else:
-            quantized_img = np.zeros_like(img_channel, dtype=np.uint8)
+            q = np.zeros_like(channel, dtype=np.uint8)
 
         glcm = graycomatrix(
-            quantized_img,
-            distances=distances,
-            angles=angles,
+            q,
+            distances=[1],
+            angles=[0, np.pi/4, np.pi/2, 3*np.pi/4],
             levels=levels,
             symmetric=True,
             normed=True
         )
 
-        features_list = [
-            graycoprops(glcm, prop).ravel()
-            for prop in ['contrast', 'dissimilarity', 'homogeneity', 'energy', 'correlation']
-        ]
+        props = ["contrast","dissimilarity","homogeneity","energy","correlation"]
+        feats.append(np.concatenate([graycoprops(glcm,p).ravel() for p in props]))
 
-        channel_features = np.concatenate(features_list)
-        all_features.append(channel_features)
+    return np.concatenate(feats).astype(np.float32)
 
-    final_feature_vector = np.concatenate(all_features).astype(np.float32)
-    return final_feature_vector
-
-def sobel_feature(image, n_bins_mag=16, n_bins_ang=16):
+def sobel_feature(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0)
-    sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1)
+    sx = cv2.Sobel(gray, cv2.CV_64F, 1, 0)
+    sy = cv2.Sobel(gray, cv2.CV_64F, 0, 1)
 
-    magnitude = np.sqrt(sobelx**2 + sobely**2)
-    orientation = np.arctan2(sobely, sobelx)
+    mag = np.sqrt(sx**2 + sy**2)
+    ang = np.arctan2(sy, sx)
 
-    mag_flat = magnitude.ravel()
-    ori_flat = orientation.ravel()
+    if mag.max() > 0:
+        mag /= mag.max()
 
-    if mag_flat.max() > 0:
-        mag_flat = mag_flat / mag_flat.max()
+    h_mag, _ = np.histogram(mag.ravel(), bins=16, range=(0,1), density=True)
+    h_ang, _ = np.histogram(ang.ravel(), bins=16, range=(-np.pi,np.pi), density=True)
 
-    hist_mag, _ = np.histogram(
-        mag_flat,
-        bins=n_bins_mag,
-        range=(0.0, 1.0),
-        density=True
-    )
-
-    hist_ori, _ = np.histogram(
-        ori_flat,
-        bins=n_bins_ang,
-        range=(-np.pi, np.pi),
-        density=True
-    )
-
-    sobel_feat = np.concatenate([hist_mag, hist_ori]).astype(np.float32)
-    return sobel_feat
+    return np.concatenate([h_mag, h_ang]).astype(np.float32)
 
 def extract_features(img):
-    f1 = color_histogram(img)
-    f2 = ccm_feature(img)
-    f3 = sobel_feature(img)
-    return np.concatenate([f1,f2,f3])[None,:]
+    f = np.concatenate([
+        color_histogram(img),
+        ccm_feature(img),
+        sobel_feature(img)
+    ])
+    return f[None, :]
 
 def preprocess(X):
     if scaler is not None:
@@ -124,27 +99,44 @@ def preprocess(X):
         X = pca.transform(X)
     return X
 
-def detect_feces_bbox(image):
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (7, 7), 0)
+def crop_roi_from_yolo(img, label_path):
+    h, w, _ = img.shape
 
-    th = cv2.adaptiveThreshold(
-        blur, 255,
-        cv2.ADAPTIVE_THRESH_MEAN_C,
-        cv2.THRESH_BINARY_INV,
-        31, 5
-    )
-
-    kernel = np.ones((5, 5), np.uint8)
-    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel, iterations=2)
-
-    contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
+    if not os.path.exists(label_path):
         return None
 
-    cnt = max(contours, key=cv2.contourArea)
-    return cv2.boundingRect(cnt)
+    with open(label_path) as f:
+        line = f.readline().strip()
+        if line == "":
+            return None
+        _, xc, yc, bw, bh = map(float, line.split())
 
+    xc *= w; yc *= h
+    bw *= w; bh *= h
+
+    x1 = int(xc - bw/2)
+    y1 = int(yc - bh/2)
+    x2 = int(xc + bw/2)
+    y2 = int(yc + bh/2)
+
+    x1 = max(0,x1); y1 = max(0,y1)
+    x2 = min(w,x2); y2 = min(h,y2)
+
+    roi = img[y1:y2, x1:x2]
+    if roi.size == 0:
+        return None
+
+    return roi, (x1,y1,x2-x1,y2-y1)
+
+def auto_find_label(image_name):
+    """
+    cocci.0.jpg -> labels/cocci/cocci.0.txt
+    """
+    base = os.path.splitext(image_name)[0]   # cocci.0
+    class_name = base.split(".")[0]           # cocci
+
+    label_path = os.path.join("labels", class_name, base + ".txt")
+    return label_path
 
 menu = st.sidebar.radio("Menu", ["Home","Predict","Model Info"])
 
@@ -156,91 +148,79 @@ st.sidebar.markdown(
 
 
 if menu == "Home":
-    st.markdown("## 🐔 Poultry Feces Classification System")
-
+    st.title("🐔 Poultry Feces Classification")
     st.write("""
-    This web application presents a **computer vision–based classification system**
-    designed to identify poultry feces conditions using **traditional features extraction**
-    combined with **Principal Component Analysis (PCA)** and a **Support Vector Machine (SVM)** classifier.
-    """)
-
-    st.markdown("### 🔬 Classification Categories")
-    st.markdown("""
-    - **Coccidiosis**
-    - **Salmonella**
-    - **Healthy**
+    Traditional Computer Vision approach using:
+    - Color Histogram
+    - GLCM (CCM)
+    - Sobel Edge Histogram  
+    + PCA + SVM
     """)
 
 elif menu == "Predict":
-    st.markdown("## 🔍 Image-based Prediction")
-    with st.expander("📘 How to Use", expanded=False):
-        st.markdown(
-        """
-        1. Upload an image containing poultry feces (**JPG / PNG** format).
-        2. The system will automatically detect the feces region in the image.
-        3. Visual features are extracted and processed using the trained **SVM** model.
-        4. The predicted class and class probabilities will be displayed.
-        """
-    )
+    st.title("🔍 Image Prediction")
 
-
-    uploaded = st.file_uploader(
-        "Upload image (JPG / PNG)",
-        ["jpg", "jpeg", "png"]
-    )
+    uploaded = st.file_uploader("Upload image", ["jpg","jpeg","png"])
 
     if uploaded:
         img_bytes = np.frombuffer(uploaded.read(), np.uint8)
         img = cv2.imdecode(img_bytes, cv2.IMREAD_COLOR)
 
-        IMG_HEIGHT = 224
-        IMG_WIDTH  = 224
-        img = cv2.resize(img, (IMG_WIDTH, IMG_HEIGHT))
-
-        st.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
-                 caption="Input Image", width=350)
-
-        with st.spinner("Detecting feces region..."):
-            bbox = detect_feces_bbox(img)
-
-        if bbox is None:
-            st.error("No feces detected in the image.")
+        if img is None:
+            st.error("Failed to read image")
             st.stop()
 
-        x, y, w, h = bbox
-        roi = img[y:y+h, x:x+w]
+        img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
+        st.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
+                 caption="Input Image")
 
-        X = extract_features(roi)
-        X = preprocess(X)
+        # ===============================
+        # AUTO YOLO LABEL
+        # ===============================
+        label_path = auto_find_label(uploaded.name)
 
+        if not os.path.exists(label_path):
+            st.error(f"YOLO label not found:\n{label_path}")
+            st.stop()
+
+        # ===============================
+        # CROP ROI
+        # ===============================
+        result = crop_roi_from_yolo(img, label_path)
+        if result is None:
+            st.error("Failed to crop ROI")
+            st.stop()
+
+        roi, (x,y,w,h) = result
+        roi = cv2.resize(roi, (IMG_SIZE, IMG_SIZE))
+
+        # ===============================
+        # PREDICTION
+        # ===============================
+        X = preprocess(extract_features(roi))
         probs = svm.predict_proba(X)[0]
-        idx = np.argmax(probs)
-        pred_label = svm.classes_[idx]
-        pred_class = class_names[int(pred_label)]
 
+        idx = np.argmax(probs)
+        pred_class = class_names[idx]
+
+        # ===============================
+        # DISPLAY
+        # ===============================
         boxed = img.copy()
-        cv2.rectangle(boxed, (x, y), (x+w, y+h), (0, 255, 0), 3)
+        cv2.rectangle(boxed, (x,y), (x+w,y+h), (0,255,0), 3)
 
         st.image(cv2.cvtColor(boxed, cv2.COLOR_BGR2RGB),
-                 caption="Detected ROI", width=350)
+                 caption="Detected Feces")
 
-        st.markdown("### 🧪 Classification Result")
-        st.success(f"**Predicted Condition:** {pred_class.upper()}")
+        st.success(f"**Prediction: {pred_class.upper()}**")
 
-        st.markdown("#### 📊 Class Probabilities")
-        for i, p in enumerate(probs):
-            st.write(f"- **{class_names[int(svm.classes_[i])]}** : {p:.4f}")
+        st.markdown("### 📊 Probabilities")
+        for cls, p in zip(class_names, probs):
+            st.write(f"- **{cls}** : {p*100:.2f}%")
 
 elif menu == "Model Info":
-    st.markdown("## 📦 Model Information")
-
-    st.markdown("### Class Labels")
-    st.write(class_names)
-
-    st.markdown("### Model Components")
-    st.write(f"- **Classifier**: Support Vector Machine (SVM)")
-    st.write(f"- **Scaler**: {type(scaler).__name__ if scaler else 'None'}")
-    st.write(f"- **Dimensionality Reduction**: {type(pca).__name__ if pca else 'None'}")
-
-    if pca:
-        st.write(f"- **PCA Components**: {pca.n_components_}")
+    st.title("📦 Model Info")
+    st.write("Classes:", class_names)
+    st.write("Classifier:", type(svm).__name__)
+    st.write("Scaler:", type(scaler).__name__ if scaler else "None")
+    st.write("PCA:", type(pca).__name__ if pca else "None")
