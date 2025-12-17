@@ -149,22 +149,45 @@ def detect_feces_bbox(image):
 menu = st.sidebar.radio("Menu", ["Home","Predict","Model Info"])
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("Computer Vision Final Project — Built with SVM.")
+st.sidebar.markdown(
+    "**Computer Vision Final Project**  \n"
+    "Poultry Feces Classification using traditional Features Extraction & SVM"
+)
 
 
 if menu == "Home":
-    st.markdown("## 🐔 Poultry Feces Classifier")
+    st.markdown("## 🐔 Poultry Feces Classification System")
+
     st.write("""
-    This application uses **hand-crafted features + PCA + SVM**
-    to classify poultry feces into:
-    - Cocci
-    - Salmonella
-    - Healthy
+    This web application presents a **computer vision–based classification system**
+    designed to identify poultry feces conditions using **traditional features extraction**
+    combined with **Principal Component Analysis (PCA)** and a **Support Vector Machine (SVM)** classifier.
+    """)
+
+    st.markdown("### 🔬 Classification Categories")
+    st.markdown("""
+    - **Coccidiosis**
+    - **Salmonella**
+    - **Healthy**
     """)
 
 elif menu == "Predict":
-    st.markdown("## 🔍 Prediction")
-    uploaded = st.file_uploader("Upload image", ["jpg","jpeg","png"])
+    st.markdown("## 🔍 Image-based Prediction")
+    with st.expander("📘 How to Use", expanded=False):
+        st.markdown(
+        """
+        1. Upload an image containing poultry feces (**JPG / PNG** format).
+        2. The system will automatically detect the feces region in the image.
+        3. Visual features are extracted and processed using the trained **SVM** model.
+        4. The predicted class and class probabilities will be displayed.
+        """
+    )
+
+
+    uploaded = st.file_uploader(
+        "Upload image (JPG / PNG)",
+        ["jpg", "jpeg", "png"]
+    )
 
     if uploaded:
         img_bytes = np.frombuffer(uploaded.read(), np.uint8)
@@ -201,16 +224,23 @@ elif menu == "Predict":
         st.image(cv2.cvtColor(boxed, cv2.COLOR_BGR2RGB),
                  caption="Detected ROI", width=350)
 
-        st.markdown(f"### 🧪 Result: **{pred_class.upper()}**")
+        st.markdown("### 🧪 Classification Result")
+        st.success(f"**Predicted Condition:** {pred_class.upper()}")
 
-        st.markdown("#### Probabilities:")
+        st.markdown("#### 📊 Class Probabilities")
         for i, p in enumerate(probs):
-            st.write(f"- {class_names[int(svm.classes_[i])]} : **{p:.4f}**")
+            st.write(f"- **{class_names[int(svm.classes_[i])]}** : {p:.4f}")
 
 elif menu == "Model Info":
-    st.markdown("## 📦 Model Info")
-    st.write(f"- Classes: {class_names}")
-    st.write(f"- Scaler: {type(scaler).__name__ if scaler else 'None'}")
-    st.write(f"- PCA: {type(pca).__name__ if pca else 'None'}")
+    st.markdown("## 📦 Model Information")
+
+    st.markdown("### Class Labels")
+    st.write(class_names)
+
+    st.markdown("### Model Components")
+    st.write(f"- **Classifier**: Support Vector Machine (SVM)")
+    st.write(f"- **Scaler**: {type(scaler).__name__ if scaler else 'None'}")
+    st.write(f"- **Dimensionality Reduction**: {type(pca).__name__ if pca else 'None'}")
+
     if pca:
-        st.write(f"- PCA components: {pca.n_components_}")
+        st.write(f"- **PCA Components**: {pca.n_components_}")
