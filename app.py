@@ -11,9 +11,10 @@ st.set_page_config(
     layout="wide"
 )
 
-IMG_SIZE = 256 
+IMG_SIZE = 256
+LABEL_ROOT = "labels" 
 
-@st.cache(allow_output_mutation=True)
+@st.cache_resource
 def load_model(path="best_svm_final.pkl"):
     with open(path, "rb") as f:
         return pickle.load(f)
@@ -99,6 +100,16 @@ def preprocess(X):
         X = pca.transform(X)
     return X
 
+def auto_find_label(image_name):
+    """
+    cocci.0.jpg -> labels/cocci/cocci.0.txt
+    """
+    base = os.path.splitext(image_name)[0]  
+    class_name = base.split(".")[0]           
+
+    label_path = os.path.join("labels", class_name, base + ".txt")
+    return label_path
+
 def crop_roi_from_yolo(img, label_path):
     h, w, _ = img.shape
 
@@ -128,39 +139,65 @@ def crop_roi_from_yolo(img, label_path):
 
     return roi, (x1,y1,x2-x1,y2-y1)
 
-def auto_find_label(image_name):
-    """
-    cocci.0.jpg -> labels/cocci/cocci.0.txt
-    """
-    base = os.path.splitext(image_name)[0]   # cocci.0
-    class_name = base.split(".")[0]           # cocci
-
-    label_path = os.path.join("labels", class_name, base + ".txt")
-    return label_path
-
 menu = st.sidebar.radio("Menu", ["Home","Predict","Model Info"])
 
 st.sidebar.markdown("---")
 st.sidebar.markdown(
     "**Computer Vision Final Project**  \n"
-    "Poultry Feces Classification using traditional Features Extraction & SVM"
+    "Poultry Feces Classification using Traditional Features Extraction & SVM"
 )
 
 
 if menu == "Home":
-    st.title("🐔 Poultry Feces Classification")
-    st.write("""
-    Traditional Computer Vision approach using:
-    - Color Histogram
-    - GLCM (CCM)
-    - Sobel Edge Histogram  
-    + PCA + SVM
+    st.markdown(
+        """
+        <div class="header">
+            <h1>🐔 Poultry Feces Classification</h1>
+            <p>Detection and classification of poultry diseases from feces images</p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown("### 🔬 Methodology")
+    st.markdown("""
+    This application applies a **traditional computer vision approach** consisting of:
+    - **Color Histogram (HSV)** for color distribution
+    - **GLCM (CCM)** for texture analysis
+    - **Sobel Edge Histogram** for shape information  
+    - **Principal Component Analysis (PCA)** for dimensionality reduction  
+    - **Support Vector Machine (SVM)** for classification
     """)
 
-elif menu == "Predict":
-    st.title("🔍 Image Prediction")
+    st.markdown("### 🦠 Target Classes")
+    for cls in class_names:
+        st.write(f"- {cls.capitalize()}")
 
-    uploaded = st.file_uploader("Upload image", ["jpg","jpeg","png"])
+elif menu == "Predict":
+    st.markdown(
+        """
+        <div class="header">
+            <h1>🔍 Image Prediction</h1>
+            <p>Automatic feces detection and disease classification</p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    with st.expander("📘 How to Use", expanded=False):
+        st.markdown(
+            """
+            1. Upload a poultry feces image (**JPG / PNG**).
+            2. The system automatically loads the corresponding **YOLO label**.
+            3. The feces region is cropped as ROI.
+            4. The trained **SVM model** predicts the disease class.
+            """
+        )
+
+    uploaded = st.file_uploader(
+        "Upload poultry feces image",
+        type=["jpg", "jpeg", "png"]
+    )
 
     if uploaded:
         img_bytes = np.frombuffer(uploaded.read(), np.uint8)
@@ -173,19 +210,13 @@ elif menu == "Predict":
         img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
         st.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
                  caption="Input Image")
-
-        # ===============================
-        # AUTO YOLO LABEL
-        # ===============================
+        
         label_path = auto_find_label(uploaded.name)
 
         if not os.path.exists(label_path):
             st.error(f"YOLO label not found:\n{label_path}")
             st.stop()
 
-        # ===============================
-        # CROP ROI
-        # ===============================
         result = crop_roi_from_yolo(img, label_path)
         if result is None:
             st.error("Failed to crop ROI")
@@ -194,23 +225,21 @@ elif menu == "Predict":
         roi, (x,y,w,h) = result
         roi = cv2.resize(roi, (IMG_SIZE, IMG_SIZE))
 
-        # ===============================
-        # PREDICTION
-        # ===============================
         X = preprocess(extract_features(roi))
         probs = svm.predict_proba(X)[0]
 
         idx = np.argmax(probs)
         pred_class = class_names[idx]
 
-        # ===============================
-        # DISPLAY
-        # ===============================
+
         boxed = img.copy()
         cv2.rectangle(boxed, (x,y), (x+w,y+h), (0,255,0), 3)
 
-        st.image(cv2.cvtColor(boxed, cv2.COLOR_BGR2RGB),
-                 caption="Detected Feces")
+        st.image(
+            cv2.cvtColor(boxed, cv2.COLOR_BGR2RGB),
+            caption="Detected Feces Region",
+            use_container_width=True
+        )
 
         st.success(f"**Prediction: {pred_class.upper()}**")
 
@@ -219,8 +248,17 @@ elif menu == "Predict":
             st.write(f"- **{cls}** : {p*100:.2f}%")
 
 elif menu == "Model Info":
-    st.title("📦 Model Info")
-    st.write("Classes:", class_names)
-    st.write("Classifier:", type(svm).__name__)
-    st.write("Scaler:", type(scaler).__name__ if scaler else "None")
-    st.write("PCA:", type(pca).__name__ if pca else "None")
+    st.markdown(
+        """
+        <div class="header">
+            <h1>📦 Model Information</h1>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    st.markdown("### 🧠 Model Components")
+    st.write(f"- **Classes**: {class_names}")
+    st.write(f"- **Classifier**: {type(svm).__name__}")
+    st.write(f"- **Scaler**: {type(scaler).__name__ if scaler else 'None'}")
+    st.write(f"- **PCA**: {type(pca).__name__ if pca else 'None'}")
