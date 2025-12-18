@@ -1,7 +1,6 @@
 import streamlit as st
 import numpy as np
 import pickle
-import os
 import cv2
 from skimage.feature import graycomatrix, graycoprops
 
@@ -15,12 +14,12 @@ IMG_SIZE = 256
 LABEL_ROOT = "labels" 
 
 @st.cache_resource
-def load_model(path="best_svm_final.pkl"):
+def load_model(path="best_svm.pkl"):
     with open(path, "rb") as f:
         return pickle.load(f)
 
 try:
-    bundle = load_model("best_svm_final.pkl")
+    bundle = load_model("best_svm.pkl")
 except Exception as e:
     st.error(f"Failed to load model: {e}")
     st.stop()
@@ -100,44 +99,55 @@ def preprocess(X):
         X = pca.transform(X)
     return X
 
-def auto_find_label(image_name):
-    """
-    cocci.0.jpg -> labels/cocci/cocci.0.txt
-    """
-    base = os.path.splitext(image_name)[0]  
-    class_name = base.split(".")[0]           
+def detect_feces_bbox(image):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (7,7), 0)
+   
+    th = cv2.adaptiveThreshold(
+        blur, 255,
+        cv2.ADAPTIVE_THRESH_MEAN_C,
+        cv2.THRESH_BINARY_INV,
+        31, 5
+    )
 
-    label_path = os.path.join("labels", class_name, base + ".txt")
-    return label_path
-
-def crop_roi_from_yolo(img, label_path):
-    h, w, _ = img.shape
-
-    if not os.path.exists(label_path):
+    kernel = np.ones((5,5), np.uint8)
+    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel, iterations=2)
+    contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if len(contours) == 0:
         return None
 
-    with open(label_path) as f:
-        line = f.readline().strip()
-        if line == "":
-            return None
-        _, xc, yc, bw, bh = map(float, line.split())
+    candidates = []
+    for c in contours:
+        x, y, w, h = cv2.boundingRect(c)
+        area = w*h
+        if area < 200:
+            continue
+        ratio = w / h
+        if ratio < 0.2 or ratio > 5:
+            continue
+        patch = gray[y:y+h, x:x+w]
+        if patch.size == 0:
+            continue
+        variance = np.var(patch)
+        if variance < 20:
+            continue
+        candidates.append((c, area))
 
-    xc *= w; yc *= h
-    bw *= w; bh *= h
-
-    x1 = int(xc - bw/2)
-    y1 = int(yc - bh/2)
-    x2 = int(xc + bw/2)
-    y2 = int(yc + bh/2)
-
-    x1 = max(0,x1); y1 = max(0,y1)
-    x2 = min(w,x2); y2 = min(h,y2)
-
-    roi = img[y1:y2, x1:x2]
-    if roi.size == 0:
+    if len(candidates) == 0:
         return None
 
-    return roi, (x1,y1,x2-x1,y2-y1)
+    cnt = max(candidates, key=lambda x: x[1])[0]
+    x, y, w, h = cv2.boundingRect(cnt)
+
+    pad_w = int(w * 0.1)
+    pad_h = int(h * 0.1)
+    x = max(0, x - pad_w)
+    y = max(0, y - pad_h)
+    w = min(image.shape[1] - x, w + 2*pad_w)
+    h = min(image.shape[0] - y, h + 2*pad_h)
+
+    return x, y, w, h
+
 
 menu = st.sidebar.radio("Menu", ["Home","Predict","Model Info"])
 
@@ -188,11 +198,12 @@ elif menu == "Predict":
         st.markdown(
             """
             1. Upload a poultry feces image (**JPG / PNG**).
-            2. The system automatically loads the corresponding **YOLO label**.
-            3. The feces region is cropped as ROI.
+            2. The system automatically detects the feces region (ROI) using image processing techniques.
+            3. Features are extracted from the detected ROI (color, texture, and shape).
             4. The trained **SVM model** predicts the disease class.
             """
         )
+
 
     uploaded = st.file_uploader(
         "Upload poultry feces image",
@@ -207,42 +218,34 @@ elif menu == "Predict":
             st.error("Failed to read image")
             st.stop()
 
-        img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
-        st.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB),
-                 caption="Input Image")
-        
-        label_path = auto_find_label(uploaded.name)
+        display_img = cv2.resize(img, (IMG_SIZE, IMG_SIZE))
 
-        if not os.path.exists(label_path):
-            st.error(f"YOLO label not found:\n{label_path}")
+        bbox = detect_feces_bbox(display_img)
+        if bbox is None:
+            st.error("Tidak ada objek terdeteksi")
             st.stop()
 
-        result = crop_roi_from_yolo(img, label_path)
-        if result is None:
-            st.error("Failed to crop ROI")
-            st.stop()
-
-        roi, (x,y,w,h) = result
+        x, y, w, h = bbox
+        roi = display_img[y:y+h, x:x+w]
         roi = cv2.resize(roi, (IMG_SIZE, IMG_SIZE))
 
+        # Feature extraction & prediction
         X = preprocess(extract_features(roi))
         probs = svm.predict_proba(X)[0]
-
         idx = np.argmax(probs)
         pred_class = class_names[idx]
 
+        # Draw bbox
+        boxed = display_img.copy()
+        cv2.rectangle(boxed, (x, y), (x+w, y+h), (0,255,0), 2)
 
-        boxed = img.copy()
-        cv2.rectangle(boxed, (x,y), (x+w,y+h), (0,255,0), 3)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.image(cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB), caption="Input Image", width=250)
+        with col2:
+            st.image(cv2.cvtColor(boxed, cv2.COLOR_BGR2RGB), caption=f"Detected ROI – Prediction: {pred_class.upper()}", width=250)
 
-        st.image(
-            cv2.cvtColor(boxed, cv2.COLOR_BGR2RGB),
-            caption="Detected Feces Region",
-            use_container_width=True
-        )
-
-        st.success(f"**Prediction: {pred_class.upper()}**")
-
+        # Probabilities
         st.markdown("### 📊 Probabilities")
         for cls, p in zip(class_names, probs):
             st.write(f"- **{cls}** : {p*100:.2f}%")
