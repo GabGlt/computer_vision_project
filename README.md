@@ -54,6 +54,6 @@ Open this URL in your browser to start interacting with the app.
 
 ### 3. Access the Deployed App
 The app is also deployed online and can be accessed here:
-```
+<br>
 🔗 https://poultry-feces-classifier.streamlit.app/
-```
+
