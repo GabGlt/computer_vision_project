@@ -14,12 +14,12 @@ IMG_SIZE = 256
 LABEL_ROOT = "labels" 
 
 @st.cache_resource
-def load_model(path="best_svm.pkl"):
+def load_model(path="best_model.pkl"):
     with open(path, "rb") as f:
         return pickle.load(f)
 
 try:
-    bundle = load_model("best_svm.pkl")
+    bundle = load_model("best_model.pkl")
 except Exception as e:
     st.error(f"Failed to load model: {e}")
     st.stop()
@@ -36,9 +36,9 @@ def color_histogram(image):
     s = cv2.calcHist([hsv],[1],None,[256],[0,256])
     v = cv2.calcHist([hsv],[2],None,[256],[0,256])
 
-    cv2.normalize(h, h)
-    cv2.normalize(s, s)
-    cv2.normalize(v, v)
+    cv2.normalize(h, h, 0, 255, cv2.NORM_MINMAX)
+    cv2.normalize(s, s, 0, 255, cv2.NORM_MINMAX)
+    cv2.normalize(v, v, 0, 255, cv2.NORM_MINMAX)
 
     return np.concatenate([h.flatten(), s.flatten(), v.flatten()]).astype(np.float32)
 
@@ -148,17 +148,24 @@ def detect_feces_bbox(image):
 
     return x, y, w, h
 
-
-menu = st.sidebar.radio("Menu", ["Home","Predict","Model Info"])
+menu = st.sidebar.radio(
+    "Navigation",
+    ["Overview", "Prediction", "Model Description"]
+)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown(
-    "**Computer Vision Final Project**  \n"
-    "Poultry Feces Classification using Traditional Features Extraction & SVM"
+    """
+    **Final Project – Computer Vision**  
+    Poultry Feces Disease Classification and Detection 
+      
+    **Approach:**  
+    Traditional Feature Extraction + SVM  
+    """
 )
 
 
-if menu == "Home":
+if menu == "Overview":
     st.markdown(
         """
         <div class="header">
@@ -183,7 +190,7 @@ if menu == "Home":
     for cls in class_names:
         st.write(f"- {cls.capitalize()}")
 
-elif menu == "Predict":
+elif menu == "Prediction":
     st.markdown(
         """
         <div class="header">
@@ -222,7 +229,7 @@ elif menu == "Predict":
 
         bbox = detect_feces_bbox(display_img)
         if bbox is None:
-            st.error("Tidak ada objek terdeteksi")
+            st.error("No object detected")
             st.stop()
 
         x, y, w, h = bbox
@@ -241,22 +248,31 @@ elif menu == "Predict":
 
         col1, col2 = st.columns(2)
         with col1:
-            st.image(cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB), caption="Input Image", width=250)
+            st.image(
+                cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB),
+                caption="Input Image",
+                width="stretch"
+            )
+
         with col2:
-            st.image(cv2.cvtColor(boxed, cv2.COLOR_BGR2RGB), caption=f"Detected ROI – Prediction: {pred_class.upper()}", width=250)
+            st.image(
+                cv2.cvtColor(boxed, cv2.COLOR_BGR2RGB),
+                caption=f"Detected ROI – Prediction: {pred_class.upper()}",
+                width="stretch"
+            )
 
         # Probabilities
         st.markdown("### 📊 Probabilities")
         for cls, p in zip(class_names, probs):
             st.write(f"- **{cls}** : {p*100:.2f}%")
 
-elif menu == "Model Info":
+elif menu == "Model Description":
     st.markdown(
         """
         <div class="header">
             <h1>📦 Model Information</h1>
         </div>
-        """,
+        """,   
         unsafe_allow_html=True
     )
 
