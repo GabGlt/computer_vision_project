@@ -240,11 +240,44 @@ elif menu == "Prediction":
         X = preprocess(extract_features(roi))
         probs = svm.predict_proba(X)[0]
         idx = np.argmax(probs)
+        confidence = probs[idx]
         pred_class = class_names[idx]
 
-        # Draw bbox
+        # Draw bounding box
         boxed = display_img.copy()
         cv2.rectangle(boxed, (x, y), (x+w, y+h), (0,255,0), 2)
+
+        label = f"{pred_class.upper()} ({confidence*100:.1f}%)"
+
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.5
+        thickness = 1
+
+        (text_w, text_h), _ = cv2.getTextSize(
+            label, font, font_scale, thickness
+        )
+
+        text_x = x
+        text_y = y - 8 if y - 8 > text_h else y + text_h + 8
+
+        cv2.rectangle(
+            boxed,
+            (text_x, text_y - text_h - 4),
+            (text_x + text_w + 4, text_y),
+            (0,255,0),
+            -1
+        )
+
+        cv2.putText(
+            boxed,
+            label,
+            (text_x + 2, text_y - 2),
+            font,
+            font_scale,
+            (0,0,0),
+            thickness,
+            cv2.LINE_AA
+        )
 
         col1, col2 = st.columns(2)
         with col1:
