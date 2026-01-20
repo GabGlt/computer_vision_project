@@ -32,15 +32,19 @@ class_names = bundle["class_names"]
 def color_histogram(image):
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
-    h = cv2.calcHist([hsv],[0],None,[180],[0,180])
-    s = cv2.calcHist([hsv],[1],None,[256],[0,256])
-    v = cv2.calcHist([hsv],[2],None,[256],[0,256])
+    h = cv2.calcHist([hsv], [0], None, [32], [0, 180])
+    s = cv2.calcHist([hsv], [1], None, [32], [0, 256])
+    v = cv2.calcHist([hsv], [2], None, [32], [0, 256])
 
-    cv2.normalize(h, h, 0, 255, cv2.NORM_MINMAX)
-    cv2.normalize(s, s, 0, 255, cv2.NORM_MINMAX)
-    cv2.normalize(v, v, 0, 255, cv2.NORM_MINMAX)
+    cv2.normalize(h, h, 0, 1, cv2.NORM_MINMAX)
+    cv2.normalize(s, s, 0, 1, cv2.NORM_MINMAX)
+    cv2.normalize(v, v, 0, 1, cv2.NORM_MINMAX)
 
-    return np.concatenate([h.flatten(), s.flatten(), v.flatten()]).astype(np.float32)
+    return np.concatenate([
+        h.flatten(),
+        s.flatten(),
+        v.flatten()
+    ]).astype(np.float32)
 
 def ccm_feature(image, levels=16):
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
