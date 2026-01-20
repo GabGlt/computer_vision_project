@@ -29,6 +29,12 @@ scaler      = bundle.get("scaler", None)
 pca         = bundle.get("pca", None)
 class_names = bundle["class_names"]
 
+if scaler is not None:
+    st.write("Scaler expects:", scaler.n_features_in_)
+
+if pca is not None:
+    st.write("PCA components:", pca.n_components_)
+
 def color_histogram(image):
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
